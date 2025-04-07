@@ -4,13 +4,37 @@ from fastapi import FastAPI, Body, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from mcp_agent.core.fastagent import FastAgent
+from contextlib import asynccontextmanager
 import uvicorn
-
-# Create FastAPI application
-app = FastAPI(title="Bakery API", description="Bakery availability checker with MCP servers")
 
 # Create FastAgent with explicit config path
 fast = FastAgent("Bakery Agent", config_path="fastagent.config.yaml")
+
+# Define the lifespan context manager for FastAPI
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize MCP servers on startup
+    try:
+        print("Initializing MCP servers...")
+        # The run method will be used for each request, not here
+        # This is just a placeholder for lifespan events
+    except Exception as e:
+        print(f"Warning in lifespan startup: {str(e)}")
+    
+    yield  # This is where FastAPI serves requests
+    
+    # Cleanup on shutdown
+    try:
+        print("Shutting down MCP servers...")
+    except Exception as e:
+        print(f"Warning in lifespan shutdown: {str(e)}")
+
+# Create FastAPI application with lifespan
+app = FastAPI(
+    title="Bakery API", 
+    description="Bakery availability checker with MCP servers",
+    lifespan=lifespan
+)
 
 # Define request model for JSON input
 class BakeryQuery(BaseModel):
@@ -37,15 +61,6 @@ class BakeryQuery(BaseModel):
 async def bakery_agent():
     pass  # Agent is defined by decorator
 
-# Initialize the MCPApp at startup
-@app.on_event("startup")
-async def startup_event():
-    try:
-        await fast.initialize()
-        print("MCPApp initialized successfully at startup")
-    except Exception as e:
-        print(f"Error initializing MCPApp: {str(e)}")
-
 # Define API endpoints
 @app.get("/")
 async def root():
@@ -56,7 +71,7 @@ async def root():
 async def check_availability_post(query_data: BakeryQuery):
     """Check if an item is available at the bakery on a specific day (POST method)"""
     try:
-        # Use the agent directly without accessing context first
+        # Use the agent directly with the run context manager
         async with fast.run() as agent:
             print("Agent running for POST request")
             response = await agent.bakery(query_data.query)
