@@ -14,10 +14,8 @@ default_model: openai.o3-mini.high
 
 # Logging and Console Configuration:
 logger:
-    # level: "debug" | "info" | "warning" | "error"
-    # type: "none" | "console" | "file" | "http"
-    # path: "/path/to/logfile.jsonl"
-
+    level: "debug"  # Enable debug logging to see more details about MCP server issues
+    type: "console"  
     
     # Switch the progress display on or off
     progress_display: true
@@ -29,11 +27,19 @@ logger:
     # Truncate long tool responses on the console 
     truncate_tools: true
 
-# MCP Servers
+# MCP Servers - Updated with correct module paths and settings for recent MCP versions
 mcp_servers:
     fetch:
+        # Using direct module reference for maximum compatibility
         command: "python3"
         args: ["-m", "mcp.server.fetch"]
+        restart_on_error: true
+        restart_limit: 3
+        timeout: 30
     filesystem:
-        command: "python3"
+        # Using direct module reference for filesystem with explicit path to project root
+        command: "python3" 
         args: ["-m", "mcp.server.filesystem", "."]
+        restart_on_error: true
+        restart_limit: 3
+        timeout: 30
