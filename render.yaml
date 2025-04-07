@@ -3,7 +3,7 @@ services:
     name: bakery-api
     env: python
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: python bakery_api_simplified.py
+    startCommand: python3 --no-cli-aliases bakery_api_simplified.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18 
