@@ -3,7 +3,7 @@ services:
     name: bakery-api
     env: python
     buildCommand: chmod +x build.sh && ./build.sh
-    startCommand: python -m uvicorn bakery_api_simplified:app --host 0.0.0.0 --port $PORT
+    startCommand: python start_server.py
     envVars:
       - key: PYTHON_VERSION
         value: 3.9.18 
