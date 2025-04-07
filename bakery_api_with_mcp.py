@@ -1,6 +1,6 @@
 import asyncio
 import os
-from fastapi import FastAPI, Body, Request
+from fastapi import FastAPI, Body, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from mcp_agent.core.fastagent import FastAgent
@@ -13,15 +13,12 @@ import json
 # Create FastAgent with explicit config path
 fast = FastAgent("Bakery Agent", config_path="fastagent.config.yaml")
 
-# Global variable to hold the initialized agent
-mcp_agent = None
+# Global variable to track agent initialization status
+agent_initialized = False
 
 # Define the lifespan context manager for FastAPI
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize MCP servers on startup
-    global mcp_agent
-    
     print("Starting application lifespan...")
     print("Initializing MCP servers...")
     
@@ -48,39 +45,38 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Warning during config validation: {str(e)}")
     
-    # Actually initialize the FastAgent and MCP servers
+    # Test initialization by running the agent once
     try:
-        # First, explicitly initialize the FastAgent
-        await fast.initialize()
-        print("✅ FastAgent initialized successfully!")
-        
-        # Now create a persistent agent that will be used across requests
-        # We'll store it in the app state so it's accessible to all endpoints
+        # Store the agent manager in the app state
         app.state.agent_manager = fast
-        print("✅ Agent manager stored in application state")
         
-        # Print MCP server information for debugging
-        if hasattr(fast, "context") and hasattr(fast.context, "mcp_servers"):
-            print(f"MCP servers configured: {fast.context.mcp_servers.keys()}")
-        
+        # Verify that MCP servers work by running a minimal test
+        async with fast.run() as agent:
+            if hasattr(agent, "bakery"):
+                print("✅ Agent initialization test successful")
+                print(f"✅ Found 'bakery' agent")
+            else:
+                print("⚠️ Agent initialized but bakery agent is not defined")
+            
+            # Mark initialization as successful
+            app.state.agent_initialized = True
+            
+            # Log available MCP servers
+            if hasattr(fast, "context") and hasattr(fast.context, "mcp_servers"):
+                print(f"✅ MCP servers configured: {list(fast.context.mcp_servers.keys())}")
+                
         print("✅ MCP servers initialized and ready")
     except Exception as e:
-        print(f"❌ Error during MCP initialization: {str(e)}")
+        print(f"❌ Error during MCP initialization test: {str(e)}")
         import traceback
         traceback.print_exc()
+        app.state.agent_initialized = False
     
     # Yield control to FastAPI
     yield
     
     # Cleanup on shutdown
     print("Shutting down application...")
-    try:
-        # Cleanup MCP resources
-        if hasattr(fast, "context") and hasattr(fast.context, "cleanup"):
-            await fast.context.cleanup()
-            print("✅ MCP resources cleaned up")
-    except Exception as e:
-        print(f"❌ Error during cleanup: {str(e)}")
 
 # Create FastAPI application with lifespan
 app = FastAPI(
@@ -134,13 +130,15 @@ async def check_availability_post(query_data: BakeryQuery):
         # Access the pre-initialized FastAgent from app state
         if not hasattr(app.state, "agent_manager"):
             raise Exception("Agent manager not found in application state")
-        
+            
         agent_manager = app.state.agent_manager
         
-        async with agent_manager.run() as agent:
-            print("Agent running for POST request")
-            response = await agent.bakery(query)
-            return {"response": response, "source": "mcp_agent"}
+        # Use a timeout to prevent hanging
+        async with asyncio.timeout(30):
+            async with agent_manager.run() as agent:
+                print("Agent running for POST request")
+                response = await agent.bakery(query)
+                return {"response": response, "source": "mcp_agent"}
     except Exception as e:
         print(f"Error in POST method: {str(e)}")
         import traceback
@@ -157,13 +155,15 @@ async def check_availability_get(item: str):
         # Access the pre-initialized FastAgent from app state
         if not hasattr(app.state, "agent_manager"):
             raise Exception("Agent manager not found in application state")
-        
+            
         agent_manager = app.state.agent_manager
         
-        async with agent_manager.run() as agent:
-            print("Agent running for GET request")
-            response = await agent.bakery(query)
-            return {"response": response, "source": "mcp_agent"}
+        # Use a timeout to prevent hanging
+        async with asyncio.timeout(30):
+            async with agent_manager.run() as agent:
+                print("Agent running for GET request")
+                response = await agent.bakery(query)
+                return {"response": response, "source": "mcp_agent"}
     except Exception as e:
         print(f"Error in GET method: {str(e)}")
         import traceback
@@ -180,8 +180,6 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"message": f"An unexpected error occurred: {str(exc)}"}
     )
-
-from fastapi import HTTPException
 
 # Add debug/status endpoint
 @app.get("/status")
@@ -210,14 +208,18 @@ async def status():
     # Add MCP server info from the pre-initialized agent
     if hasattr(app.state, "agent_manager"):
         agent_manager = app.state.agent_manager
+        initialized = getattr(app.state, "agent_initialized", False)
+        
+        status_info["mcp"] = {
+            "status": "initialized" if initialized else "error_during_initialization",
+            "agent_manager_available": True
+        }
+        
         if hasattr(agent_manager, "context") and hasattr(agent_manager.context, "mcp_servers"):
-            status_info["mcp"] = {
-                "status": "initialized",
-                "servers_configured": list(agent_manager.context.mcp_servers.keys()),
-                "agents_configured": list(agent_manager.agents.keys()) if hasattr(agent_manager, "agents") else []
-            }
-        else:
-            status_info["mcp"] = {"status": "not_fully_initialized", "error": "MCP context or servers not available"}
+            status_info["mcp"]["servers_configured"] = list(agent_manager.context.mcp_servers.keys())
+        
+        if hasattr(agent_manager, "agents"):
+            status_info["mcp"]["agents_configured"] = list(agent_manager.agents.keys())
     else:
         status_info["mcp"] = {"status": "not_initialized", "error": "Agent manager not found in application state"}
     
