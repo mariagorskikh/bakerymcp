@@ -15,7 +15,7 @@ pip install --no-cache-dir \
     httpx==0.24.1 \
     anyio==3.7.1 \
     sse-starlette==1.6.5 \
-    numpy==1.24.4 \
+    numpy==2.2.1 \
     PyYAML==6.0.1
 
 # Echo the final requirements for debugging
