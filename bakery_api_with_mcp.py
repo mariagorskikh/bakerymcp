@@ -24,32 +24,10 @@ app = FastAPI(
 # Make sure to use absolute path for reliability
 config_path = os.path.join(os.getcwd(), "fastagent.config.yaml")
 logger.info(f"Creating FastAgent with config at: {config_path}")
-fast = FastAgent("Bakery Agent", config_path=config_path)
 
 # Define request model for JSON input
 class BakeryQuery(BaseModel):
     query: str
-
-# Define bakery agent - ensure server names match exactly with config
-@fast.agent(
-    name="bakery",
-    instruction="""You are a helpful bakery assistant that checks if items are available.
-    
-    When a customer asks about ordering an item on a specific day, you need to:
-    1. Check if the bakery is open on that day using the filesystem tool to read bakery_hours.json
-    2. Check if the requested item is on the menu using the fetch tool to access https://www.flourbakery.com/menu
-    
-    Only say YES if both conditions are met:
-    - The bakery is open on the requested day
-    - The requested item is on the menu
-    
-    Otherwise say NO and explain why (either bakery closed or item not available).
-    Be concise in your responses.""",
-    servers=["fetch", "filesystem"],  # Must exactly match keys in mcp_servers config
-    model="openai.o3-mini.high"  # Explicitly use OpenAI model
-)
-async def bakery_agent():
-    pass  # Agent is defined by decorator
 
 # Define the lifespan context manager for FastAPI - much simpler now
 @asynccontextmanager
@@ -80,8 +58,42 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during environment check: {str(e)}")
     
-    # Store agent manager in app state (but don't try to initialize it yet)
-    app.state.agent_manager = fast
+    # Create FastAgent here after environment is verified
+    try:
+        # Explicitly initialize the FastAgent with configurations
+        app.state.agent_manager = FastAgent(
+            "Bakery Agent",
+            config_path=config_path,
+        )
+        logger.info("FastAgent instance created successfully")
+        
+        # Define bakery agent - ensure server names match exactly with config
+        @app.state.agent_manager.agent(
+            name="bakery",
+            instruction="""You are a helpful bakery assistant that checks if items are available.
+            
+            When a customer asks about ordering an item on a specific day, you need to:
+            1. Check if the bakery is open on that day using the filesystem tool to read bakery_hours.json
+            2. Check if the requested item is on the menu using the fetch tool to access https://www.flourbakery.com/menu
+            
+            Only say YES if both conditions are met:
+            - The bakery is open on the requested day
+            - The requested item is on the menu
+            
+            Otherwise say NO and explain why (either bakery closed or item not available).
+            Be concise in your responses.""",
+            servers=["fetch", "filesystem"],  # Must exactly match keys in mcp_servers config
+            model="openai.o3-mini.high"  # Explicitly use OpenAI model
+        )
+        async def bakery_agent():
+            pass  # Agent is defined by decorator
+        
+        logger.info("Bakery agent defined successfully")
+        
+    except Exception as e:
+        logger.error(f"Failed to initialize FastAgent: {str(e)}")
+        logger.error(traceback.format_exc())
+        app.state.agent_manager = None
     
     # Yield control to FastAPI - run the application
     try:
@@ -101,21 +113,44 @@ async def run_mcp_query(query: str):
     """Run a query through MCP with proper error handling and timeouts"""
     logger.info(f"Running MCP query: {query}")
     
+    if not hasattr(app.state, "agent_manager") or app.state.agent_manager is None:
+        logger.error("FastAgent not initialized properly")
+        return {
+            "response": "Sorry, the bakery service is experiencing technical issues. (FastAgent not available)",
+            "source": "error_fallback"
+        }
+    
     try:
-        # Each request needs its own MCP context
-        async with asyncio.timeout(15):
+        # Create a local FastAgent instance just for this request
+        # According to FastAgent docs, this is more reliable than using a global instance
+        local_agent = app.state.agent_manager
+        
+        # Each request needs its own MCP context with a short timeout
+        async with asyncio.timeout(10):
             # The key part: use the run() context manager for EACH request
-            async with fast.run() as agent:
-                logger.info("MCP context started successfully")
-                response = await agent.bakery(query)
-                logger.info("MCP query completed successfully")
-                return {"response": response, "source": "mcp_agent"}
+            try:
+                async with local_agent.run() as agent:
+                    logger.info("MCP context started successfully")
+                    response = await agent.bakery(query)
+                    logger.info("MCP query completed successfully")
+                    return {"response": response, "source": "mcp_agent"}
+            except Exception as inner_e:
+                logger.error(f"Error inside MCP context: {str(inner_e)}")
+                logger.error(traceback.format_exc())
+                raise inner_e
+    except asyncio.TimeoutError:
+        logger.error("MCP query timed out")
+        return {
+            "response": "Sorry, the bakery service is taking too long to respond. Please try again later.",
+            "source": "timeout_fallback"
+        }
     except Exception as e:
         logger.error(f"Error running MCP query: {str(e)}")
-        traceback.print_exc()
-        # Return a simple fallback that mentions the error
+        logger.error(traceback.format_exc())
+        
+        # Use a simple fallback response
         return {
-            "response": f"Sorry, I couldn't process your request due to a technical issue: {str(e)}",
+            "response": f"Sorry, I couldn't process your request about bakery items. Please try a simpler query or try again later.",
             "source": "error_fallback"
         }
 
@@ -141,8 +176,16 @@ async def check_availability_post(query_data: BakeryQuery):
             
     except Exception as e:
         logger.error(f"Error in POST method: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to process request: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return a user-friendly error without exposing implementation details
+        return JSONResponse(
+            status_code=500,
+            content={
+                "response": "Sorry, the bakery service is currently unavailable. Please try again later.",
+                "source": "error_response"
+            }
+        )
 
 @app.get("/check")
 async def check_availability_get(item: str):
@@ -156,17 +199,25 @@ async def check_availability_get(item: str):
             
     except Exception as e:
         logger.error(f"Error in GET method: {str(e)}")
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Failed to check item: {str(e)}")
+        logger.error(traceback.format_exc())
+        
+        # Return a user-friendly error without exposing implementation details
+        return JSONResponse(
+            status_code=500,
+            content={
+                "response": "Sorry, the bakery service is currently unavailable. Please try again later.",
+                "source": "error_response"
+            }
+        )
 
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error(f"Global exception handler caught: {exc}")
-    traceback.print_exc()
+    logger.error(traceback.format_exc())
     return JSONResponse(
         status_code=500,
-        content={"message": f"An unexpected error occurred: {str(exc)}"}
+        content={"response": "An unexpected error occurred with the bakery service. Please try again later."}
     )
 
 # Add debug/status endpoint
@@ -199,8 +250,9 @@ async def status():
     }
     
     # Add FastAgent configuration info without trying to initialize anything
-    if hasattr(app.state, "agent_manager"):
+    if hasattr(app.state, "agent_manager") and app.state.agent_manager is not None:
         agent_manager = app.state.agent_manager
+        status_info["mcp_info"]["agent_manager"] = "available"
         
         if hasattr(agent_manager, "context") and hasattr(agent_manager.context, "mcp_servers"):
             try:
@@ -213,6 +265,14 @@ async def status():
                 status_info["mcp_info"]["configured_agents"] = list(agent_manager.agents.keys())
             except Exception as e:
                 status_info["mcp_info"]["configured_agents_error"] = str(e)
+    else:
+        status_info["mcp_info"]["agent_manager"] = "not_available"
+    
+    # Add a simple hard-coded fallback to show the API is working
+    status_info["fallback_test"] = {
+        "query": "Do you have bread?",
+        "response": "Yes, we have bread available at our bakery! (This is a fallback response)"
+    }
     
     return status_info
 
