@@ -16,4 +16,4 @@ sse-starlette==1.6.5
 
 # Additional dependencies
 numpy==2.2.1
-PyYAML==6.0.1 
+PyYAML==6.0.2 

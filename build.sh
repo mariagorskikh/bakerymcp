@@ -16,7 +16,7 @@ pip install --no-cache-dir \
     anyio==3.7.1 \
     sse-starlette==1.6.5 \
     numpy==2.2.1 \
-    PyYAML==6.0.1
+    PyYAML==6.0.2
 
 # Echo the final requirements for debugging
 echo "Final requirements installed:"
