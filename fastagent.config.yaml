@@ -27,15 +27,16 @@ logger:
     # Truncate long tool responses on the console 
     truncate_tools: true
 
-# MCP Servers - Updated for MCP 1.6.0 compatibility
+# MCP Servers with exact key names matching agent server references
 mcp_servers:
-    fetch:
+    # The exact server name must match what's used in @fast.agent(servers=["fetch", "filesystem"])
+    "fetch":
         server_type: "subprocess"
         command: "python3"
         args: ["-m", "mcp.server.fetch"]
         timeout: 30
-    filesystem:
+    "filesystem":
         server_type: "subprocess"
         command: "python3" 
-        args: ["-m", "mcp.server.filesystem", "."]
+        args: ["-m", "mcp.server.filesystem", "/opt/render/project/src"]
         timeout: 30

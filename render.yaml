@@ -6,15 +6,19 @@ services:
     startCommand: python3 bakery_api_with_mcp.py
     plan: free
     healthCheckPath: /status
-    # Wait for MCP servers to fully initialize
-    initialDeployHook: sleep 30
-    # Automatically restart on failure
+    # Keep the service running even if health check fails initially
+    healthCheckTimeout: 60
+    # Disable auto-deploy to ensure manual control over deployments
     autoDeploy: false
-    # Use Python 3.11 for best compatibility with MCP
+    # Environment variables
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.0 
+        value: 3.11.0
       - key: PORT
         value: 10000
-      - key: PYTHONUNBUFFERED 
-        value: 1 
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: DEBUG
+        value: "True"
+      - key: LOGLEVEL
+        value: "debug" 
