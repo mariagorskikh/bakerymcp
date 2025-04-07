@@ -34,9 +34,23 @@ mcp_servers:
         server_type: "subprocess"
         command: "python3"
         args: ["-m", "mcp.server.fetch"]
-        timeout: 30
+        timeout: 45  # Increased timeout for network operations
+        # Add retry settings to improve reliability
+        max_restarts: 3
+        restart_delay: 2
     "filesystem":
         server_type: "subprocess"
         command: "python3" 
         args: ["-m", "mcp.server.filesystem", "/opt/render/project/src"]
         timeout: 30
+        # Add retry settings to improve reliability
+        max_restarts: 3
+        restart_delay: 2
+
+# Fallback responses when MCP servers are unavailable
+fallbacks:
+    enabled: true
+    responses:
+        default: "I'm sorry, I couldn't access that information right now."
+        filesystem: "I couldn't access the bakery schedule at the moment."
+        fetch: "I couldn't check the menu right now."
