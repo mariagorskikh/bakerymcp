@@ -51,31 +51,11 @@ class BakeryQuery(BaseModel):
 async def bakery_agent():
     pass  # Agent is defined by decorator
 
-# Define the lifespan context manager for FastAPI - AFTER agent definitions
+# Define the lifespan context manager for FastAPI - much simpler now
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Initialize MCP servers and clean up on shutdown"""
+    """Simple lifespan manager that just logs information"""
     logger.info("Starting application lifespan...")
-    logger.info("Initializing MCP environment...")
-    
-    # Check config file exists
-    if not os.path.exists(config_path):
-        logger.error(f"Config file not found at: {config_path}")
-        with open(config_path, "w") as f:
-            f.write("# FastAgent Configuration File created during runtime\n")
-            f.write("default_model: openai.o3-mini.high\n")
-            f.write("mcp_servers:\n")
-            f.write('  "fetch":\n')
-            f.write("    server_type: subprocess\n")
-            f.write("    command: python3\n")
-            f.write('    args: ["-m", "mcp.server.fetch"]\n')
-            f.write("    timeout: 30\n")
-            f.write('  "filesystem":\n') 
-            f.write("    server_type: subprocess\n")
-            f.write("    command: python3\n") 
-            f.write(f'    args: ["-m", "mcp.server.filesystem", "{os.getcwd()}"]\n')
-            f.write("    timeout: 30\n")
-        logger.info(f"Created default config file at: {config_path}")
     
     # Print environment info for debugging
     try:
@@ -87,8 +67,11 @@ async def lifespan(app: FastAPI):
             logger.warning("bakery_hours.json not found!")
 
         # Print the config for debugging
-        with open(config_path, "r") as f:
-            logger.info(f"FastAgent configuration content: {f.read()}")
+        if os.path.exists(config_path):
+            with open(config_path, "r") as f:
+                logger.info(f"FastAgent configuration content: {f.read()}")
+        else:
+            logger.error(f"Configuration file not found at: {config_path}")
             
         # Print Python path and environment
         logger.info(f"Python path: {sys.path}")
@@ -97,12 +80,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during environment check: {str(e)}")
     
-    # Store agent manager in app state 
+    # Store agent manager in app state (but don't try to initialize it yet)
     app.state.agent_manager = fast
-    app.state.agent_initialized = False
-    
-    # Set up flag for proper exception handling
-    app.state.shutdown_requested = False
     
     # Yield control to FastAPI - run the application
     try:
@@ -113,10 +92,32 @@ async def lifespan(app: FastAPI):
             traceback.print_exc()
     finally:
         logger.info("Shutting down application...")
-        app.state.shutdown_requested = True
 
 # Apply lifespan after defining it
 app.router.lifespan_context = lifespan
+
+# Helper function to run MCP operations with proper error handling
+async def run_mcp_query(query: str):
+    """Run a query through MCP with proper error handling and timeouts"""
+    logger.info(f"Running MCP query: {query}")
+    
+    try:
+        # Each request needs its own MCP context
+        async with asyncio.timeout(15):
+            # The key part: use the run() context manager for EACH request
+            async with fast.run() as agent:
+                logger.info("MCP context started successfully")
+                response = await agent.bakery(query)
+                logger.info("MCP query completed successfully")
+                return {"response": response, "source": "mcp_agent"}
+    except Exception as e:
+        logger.error(f"Error running MCP query: {str(e)}")
+        traceback.print_exc()
+        # Return a simple fallback that mentions the error
+        return {
+            "response": f"Sorry, I couldn't process your request due to a technical issue: {str(e)}",
+            "source": "error_fallback"
+        }
 
 # Define API endpoints
 @app.get("/")
@@ -135,47 +136,8 @@ async def check_availability_post(query_data: BakeryQuery):
         query = query_data.query
         logger.info(f"Processing POST request with query: {query}")
         
-        # Access the FastAgent from app state
-        if not hasattr(app.state, "agent_manager"):
-            raise Exception("Agent manager not available")
-            
-        agent_manager = app.state.agent_manager
-        
-        # Use a timeout to prevent hanging
-        try:
-            async with asyncio.timeout(15):
-                async with agent_manager.run() as agent:
-                    logger.info("Agent running for POST request")
-                    response = await agent.bakery(query)
-                    app.state.agent_initialized = True
-                    return {"response": response, "source": "mcp_agent"}
-        except Exception as e:
-            logger.error(f"Error running agent: {str(e)}")
-            
-            # Simple fallback for MCP errors
-            items = ["bread", "cake", "croissant", "donut", "muffin", "pie"]
-            days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-            
-            item_found = None
-            day_found = None
-            
-            for item in items:
-                if item in query.lower():
-                    item_found = item
-                    break
-                    
-            for day in days:
-                if day in query.lower():
-                    day_found = day
-                    break
-            
-            if item_found:
-                if day_found:
-                    return {"response": f"We likely have {item_found} available on {day_found.title()}. (API using fallback due to MCP error)", "source": "fallback"}
-                else:
-                    return {"response": f"We have {item_found} on our menu. Please specify which day you want to order it. (API using fallback due to MCP error)", "source": "fallback"}
-            else:
-                return {"response": "I couldn't determine which item you're asking about. Please specify the bakery item. (API using fallback due to MCP error)", "source": "fallback"}
+        # Use our helper function to run the MCP query
+        return await run_mcp_query(query)
             
     except Exception as e:
         logger.error(f"Error in POST method: {str(e)}")
@@ -189,32 +151,8 @@ async def check_availability_get(item: str):
         query = f"Can I order a {item}?"
         logger.info(f"Processing GET request for item: {item}")
         
-        # Access the FastAgent from app state
-        if not hasattr(app.state, "agent_manager"):
-            raise Exception("Agent manager not available")
-            
-        agent_manager = app.state.agent_manager
-        
-        # Use a timeout to prevent hanging
-        try:
-            async with asyncio.timeout(15):
-                async with agent_manager.run() as agent:
-                    logger.info("Agent running for GET request")
-                    response = await agent.bakery(query)
-                    app.state.agent_initialized = True
-                    return {"response": response, "source": "mcp_agent"}
-        except Exception as e:
-            logger.error(f"Error running agent: {str(e)}")
-            
-            # Simple fallback for MCP errors
-            bakery_items = ["bread", "cake", "croissant", "donut", "muffin", "pie"]
-            item_lower = item.lower()
-            
-            for bakery_item in bakery_items:
-                if bakery_item in item_lower:
-                    return {"response": f"Yes, we have {bakery_item} available in our bakery! (API using fallback due to MCP error)", "source": "fallback"}
-                    
-            return {"response": f"Sorry, we don't have '{item}' available in our bakery. (API using fallback due to MCP error)", "source": "fallback"}
+        # Use our helper function to run the MCP query
+        return await run_mcp_query(query)
             
     except Exception as e:
         logger.error(f"Error in GET method: {str(e)}")
@@ -235,6 +173,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 @app.get("/status")
 async def status():
     """Return system status and configuration information"""
+    # Basic status info that doesn't try to use MCP directly
     status_info = {
         "app": {
             "name": "Bakery API",
@@ -255,29 +194,19 @@ async def status():
         }
     }
     
-    # Add MCP status information
-    if hasattr(app.state, "agent_manager"):
-        agent_manager = app.state.agent_manager
-        initialized = getattr(app.state, "agent_initialized", False)
-        
-        status_info["mcp"] = {
-            "status": "initialized" if initialized else "not_fully_initialized",
-            "agent_manager_available": True
+    # Try to validate MCP by running a simple test within the status endpoint
+    try:
+        # Test MCP within this request
+        test_result = await run_mcp_query("Is the bakery open today?")
+        status_info["mcp_test"] = {
+            "status": "success",
+            "result": test_result
         }
-        
-        if hasattr(agent_manager, "context") and hasattr(agent_manager.context, "mcp_servers"):
-            try:
-                status_info["mcp"]["servers_configured"] = list(agent_manager.context.mcp_servers.keys())
-            except:
-                status_info["mcp"]["servers_configured"] = "Error accessing server keys"
-        
-        if hasattr(agent_manager, "agents"):
-            try:
-                status_info["mcp"]["agents_configured"] = list(agent_manager.agents.keys())
-            except:
-                status_info["mcp"]["agents_configured"] = "Error accessing agent keys"
-    else:
-        status_info["mcp"] = {"status": "not_initialized", "error": "Agent manager not found in application state"}
+    except Exception as e:
+        status_info["mcp_test"] = {
+            "status": "error",
+            "error": str(e)
+        }
     
     return status_info
 
