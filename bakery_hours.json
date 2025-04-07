@@ -1,7 +1,30 @@
 {
-  "opening_days": [
-    "monday",
-    "wednesday",
-    "friday"
-  ]
+  "Monday": {
+    "open": true,
+    "hours": "7:00 AM - 7:00 PM"
+  },
+  "Tuesday": {
+    "open": true,
+    "hours": "7:00 AM - 7:00 PM"
+  },
+  "Wednesday": {
+    "open": true,
+    "hours": "7:00 AM - 7:00 PM"
+  },
+  "Thursday": {
+    "open": true,
+    "hours": "7:00 AM - 7:00 PM"
+  },
+  "Friday": {
+    "open": true,
+    "hours": "7:00 AM - 9:00 PM"
+  },
+  "Saturday": {
+    "open": true,
+    "hours": "8:00 AM - 9:00 PM"
+  },
+  "Sunday": {
+    "open": false,
+    "hours": "Closed"
+  }
 } 
