@@ -180,8 +180,8 @@ mcp_servers:
             response = process_bakery_query(query)  # Use the direct query processor
             return response
 
-        # Create FastAgent instance with explicit config path
-        agent_manager = FastAgent(config_path=config_path)
+        # Create FastAgent instance with explicit config path and name
+        agent_manager = FastAgent("BakeryAgent", config_path=config_path)
         logger.info("FastAgent instance created successfully")
         
         # Initialize the FastAgent explicitly 
