@@ -3,7 +3,7 @@
 
 # Install pip directly (avoid pip-tools)
 pip install --no-cache-dir \
-    fastapi==0.104.1 \
+    fastapi==0.115.6 \
     uvicorn==0.23.2 \
     fast-agent-mcp==0.2.4 \
     requests==2.31.0 \
