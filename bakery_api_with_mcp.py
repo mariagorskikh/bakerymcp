@@ -7,7 +7,6 @@ from fastapi import FastAPI, Body, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from mcp_agent.core.fastagent import FastAgent
-from mcp_agent.core.config import FastAgentConfig, ServerConfig  # Add this import
 from contextlib import asynccontextmanager
 
 # Set up logging
@@ -55,45 +54,55 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during environment check: {str(e)}")
     
-    # Create FastAgent with explicit configuration
+    # Create a new fastagent.config.yaml file directly
     try:
-        # Create explicit server configs 
-        fetch_server = ServerConfig(
-            server_type="subprocess",
-            command="python3",
-            args=["-m", "mcp.server.fetch"],
-            timeout=45,
-            max_restarts=3,
-            restart_delay=2
-        )
+        # Create configuration file with explicit server definitions
+        config_content = """
+# FastAgent Configuration File
+default_model: openai.o3-mini.high
+
+# Logging and Console Configuration:
+logger:
+    level: "debug"
+    type: "console"  
+    progress_display: true
+    show_chat: true
+    show_tools: true
+    truncate_tools: true
+
+# MCP Servers
+mcp_servers:
+    fetch:
+        server_type: subprocess
+        command: python3
+        args: ["-m", "mcp.server.fetch"]
+        timeout: 45
+        max_restarts: 3
+        restart_delay: 2
+    filesystem:
+        server_type: subprocess
+        command: python3
+        args: ["-m", "mcp.server.filesystem", "%s"]
+        timeout: 30
+        max_restarts: 3
+        restart_delay: 2
+""" % os.getcwd()
+
+        # Write the config file
+        with open("fastagent.config.yaml", "w") as f:
+            f.write(config_content)
         
-        filesystem_server = ServerConfig(
-            server_type="subprocess",
-            command="python3",
-            args=["-m", "mcp.server.filesystem", os.getcwd()],
-            timeout=30,
-            max_restarts=3,
-            restart_delay=2
-        )
+        logger.info("Created fastagent.config.yaml with explicit server definitions")
         
-        # Create explicit config object
-        explicit_config = FastAgentConfig(
-            default_model="openai.o3-mini.high",
-            mcp_servers={
-                "fetch": fetch_server,
-                "filesystem": filesystem_server
-            }
-        )
-        
-        # Create FastAgent with explicit config
+        # Create FastAgent with the new config file
         fast_agent = FastAgent(
             "Bakery Agent",
-            config=explicit_config  # Use explicit config instead of config_path
+            config_path="fastagent.config.yaml"  # Use the file we just created
         )
         
-        logger.info("FastAgent instance created successfully with explicit config")
+        logger.info("FastAgent instance created successfully")
         
-        # Define bakery agent - ensure server names match exactly with config
+        # Define bakery agent
         @fast_agent.agent(
             name="bakery",
             instruction="""You are a helpful bakery assistant that checks if items are available.
@@ -311,7 +320,7 @@ async def status():
         },
         "mcp_info": {
             "status": "configured_in_code", 
-            "note": "Using explicit ServerConfig objects instead of config file"
+            "note": "Creating config file directly instead of using config classes"
         }
     }
     
