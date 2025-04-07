@@ -1,6 +1,4 @@
 import asyncio
-import os
-import sys
 from fastapi import FastAPI, Body
 from pydantic import BaseModel
 from mcp_agent.core.fastagent import FastAgent
@@ -9,18 +7,8 @@ import uvicorn
 # Create FastAPI application
 app = FastAPI(title="Bakery API", description="Bakery availability checker")
 
-# Print debug information
-print(f"Current working directory: {os.getcwd()}")
-print(f"Files in current directory: {os.listdir('.')}")
-if os.path.exists("fastagent.config.yaml"):
-    print("Config file exists!")
-    with open("fastagent.config.yaml", "r") as f:
-        print(f"Config file contents: {f.read()}")
-else:
-    print("Config file does not exist!")
-
-# Create FastAgent with explicit config path
-fast = FastAgent("Bakery Agent", config_path="fastagent.config.yaml")
+# Create FastAgent
+fast = FastAgent("Bakery Agent")
 
 # Define request model for JSON input
 class BakeryQuery(BaseModel):
@@ -72,8 +60,6 @@ async def check_availability_get(item: str):
             response = await agent.bakery(query)
         return {"response": response}
     except Exception as e:
-        print(f"Error in check_availability_get: {str(e)}")
-        print(f"Agent configuration: {fast.context.to_dict()}")
         return {"error": str(e)}
 
 # Main function to run everything
