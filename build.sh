@@ -8,7 +8,7 @@ pip install --no-cache-dir \
     fast-agent-mcp==0.2.4 \
     requests==2.31.0 \
     python-dotenv==1.0.0 \
-    mcp==1.1.3 \
+    mcp==1.6.0 \
     pydantic==1.10.13 \
     typing-extensions==4.9.0 \
     starlette==0.40.0 \
