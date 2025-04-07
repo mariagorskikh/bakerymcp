@@ -11,7 +11,7 @@ pip install --no-cache-dir \
     mcp==1.1.3 \
     pydantic==1.10.13 \
     typing-extensions==4.9.0 \
-    starlette==0.27.0 \
+    starlette==0.40.0 \
     httpx==0.24.1 \
     anyio==3.7.1 \
     sse-starlette==1.6.5 \
