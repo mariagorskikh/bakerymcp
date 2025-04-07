@@ -30,11 +30,10 @@ logger:
     truncate_tools: true
 
 # MCP Servers
-mcp:
-    servers:
-        fetch:
-            command: "python3"
-            args: ["-m", "mcp.servers.fetch.http"]
-        filesystem:
-            command: "python3"
-            args: ["-m", "mcp.servers.filesystem"]
+mcp_servers:
+    fetch:
+        command: "python3"
+        args: ["-m", "mcp.server.fetch"]
+    filesystem:
+        command: "python3"
+        args: ["-m", "mcp.server.filesystem"]

@@ -8,7 +8,7 @@ pip install --no-cache-dir \
     fast-agent-mcp==0.2.4 \
     requests==2.31.0 \
     python-dotenv==1.0.0 \
-    mcp==1.6.0 \
+    "mcp[servers,fetch,filesystem]==1.6.0" \
     pydantic==2.10.4 \
     typing-extensions==4.12.2 \
     starlette==0.40.0 \
@@ -16,9 +16,7 @@ pip install --no-cache-dir \
     anyio==4.5.0 \
     sse-starlette==1.6.5 \
     numpy==2.2.1 \
-    PyYAML==6.0.2 \
-    mcp-server-fetch==0.1.0 \
-    mcp-server-filesystem==0.1.0
+    PyYAML==6.0.2
 
 # Echo the final requirements for debugging
 echo "Final requirements installed:"
