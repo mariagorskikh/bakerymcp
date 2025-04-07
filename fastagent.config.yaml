@@ -27,19 +27,15 @@ logger:
     # Truncate long tool responses on the console 
     truncate_tools: true
 
-# MCP Servers - Updated with correct module paths and settings for recent MCP versions
+# MCP Servers - Updated for MCP 1.6.0 compatibility
 mcp_servers:
     fetch:
-        # Using direct module reference for maximum compatibility
+        server_type: "subprocess"
         command: "python3"
         args: ["-m", "mcp.server.fetch"]
-        restart_on_error: true
-        restart_limit: 3
         timeout: 30
     filesystem:
-        # Using direct module reference for filesystem with explicit path to project root
+        server_type: "subprocess"
         command: "python3" 
         args: ["-m", "mcp.server.filesystem", "."]
-        restart_on_error: true
-        restart_limit: 3
         timeout: 30
