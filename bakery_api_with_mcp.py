@@ -1,6 +1,7 @@
 import asyncio
 import os
-from fastapi import FastAPI, Body
+from fastapi import FastAPI, Body, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from mcp_agent.core.fastagent import FastAgent
 import uvicorn
@@ -36,6 +37,15 @@ class BakeryQuery(BaseModel):
 async def bakery_agent():
     pass  # Agent is defined by decorator
 
+# Initialize the MCPApp at startup
+@app.on_event("startup")
+async def startup_event():
+    try:
+        await fast.initialize()
+        print("MCPApp initialized successfully at startup")
+    except Exception as e:
+        print(f"Error initializing MCPApp: {str(e)}")
+
 # Define API endpoints
 @app.get("/")
 async def root():
@@ -46,19 +56,18 @@ async def root():
 async def check_availability_post(query_data: BakeryQuery):
     """Check if an item is available at the bakery on a specific day (POST method)"""
     try:
-        # Print agent and context information for debugging
-        print(f"Agent context: {fast.context}")
-        print(f"Available agents: {fast.agents}")
-        print(f"Server config: {fast.context.mcp_servers}")
-        
+        # Use the agent directly without accessing context first
         async with fast.run() as agent:
+            print("Agent running for POST request")
             response = await agent.bakery(query_data.query)
-        return {"response": response}
+            return {"response": response}
     except Exception as e:
         print(f"Error in POST method: {str(e)}")
         import traceback
         traceback.print_exc()
-        return {"error": str(e)}
+        
+        # Fallback response for POST method
+        return {"response": f"Sorry, we couldn't process your query due to a technical issue: {str(e)}"}
 
 @app.get("/check")
 async def check_availability_get(item: str):
@@ -66,9 +75,6 @@ async def check_availability_get(item: str):
     try:
         query = f"Can I order a {item}?"
         print(f"Processing GET request for item: {item}")
-        print(f"Agent context: {fast.context}")
-        print(f"Available agents: {fast.agents}")
-        print(f"Server config: {fast.context.mcp_servers}")
         
         # First try a simple approach in case MCP servers are not working
         bakery_items = ["bread", "cake", "croissant", "donut", "muffin", "pie"]
@@ -80,8 +86,9 @@ async def check_availability_get(item: str):
         
         # If we got here, try using the agent
         async with fast.run() as agent:
+            print("Agent running for GET request")
             response = await agent.bakery(query)
-        return {"response": response}
+            return {"response": response}
     except Exception as e:
         print(f"Error in GET method: {str(e)}")
         import traceback
@@ -89,6 +96,15 @@ async def check_availability_get(item: str):
         
         # Fallback response if agent fails
         return {"response": f"Sorry, we couldn't check availability for '{item}' due to a technical issue. Please try again later."}
+
+# Global exception handler
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    print(f"Global exception handler caught: {exc}")
+    return JSONResponse(
+        status_code=500,
+        content={"message": f"An unexpected error occurred: {str(exc)}"}
+    )
 
 # Main function to run everything
 if __name__ == "__main__":

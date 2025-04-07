@@ -1,0 +1,12 @@
+version: '3'
+
+services:
+  bakery-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+    volumes:
+      - ./bakery_hours.json:/app/bakery_hours.json
+    restart: unless-stopped 
