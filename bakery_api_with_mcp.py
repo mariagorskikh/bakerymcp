@@ -172,7 +172,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # Add debug/status endpoint
 @app.get("/status")
 async def status():
-    """Return system status and configuration information"""
+    """Return system status and configuration information without initializing MCP"""
     # Basic status info that doesn't try to use MCP directly
     status_info = {
         "app": {
@@ -191,22 +191,28 @@ async def status():
         },
         "bakery_hours": {
             "exists": os.path.exists("bakery_hours.json")
+        },
+        "mcp_info": {
+            "status": "configured", 
+            "note": "MCP servers are initialized per-request rather than persistently"
         }
     }
     
-    # Try to validate MCP by running a simple test within the status endpoint
-    try:
-        # Test MCP within this request
-        test_result = await run_mcp_query("Is the bakery open today?")
-        status_info["mcp_test"] = {
-            "status": "success",
-            "result": test_result
-        }
-    except Exception as e:
-        status_info["mcp_test"] = {
-            "status": "error",
-            "error": str(e)
-        }
+    # Add FastAgent configuration info without trying to initialize anything
+    if hasattr(app.state, "agent_manager"):
+        agent_manager = app.state.agent_manager
+        
+        if hasattr(agent_manager, "context") and hasattr(agent_manager.context, "mcp_servers"):
+            try:
+                status_info["mcp_info"]["configured_servers"] = list(agent_manager.context.mcp_servers.keys())
+            except Exception as e:
+                status_info["mcp_info"]["configured_servers_error"] = str(e)
+        
+        if hasattr(agent_manager, "agents"):
+            try:
+                status_info["mcp_info"]["configured_agents"] = list(agent_manager.agents.keys())
+            except Exception as e:
+                status_info["mcp_info"]["configured_agents_error"] = str(e)
     
     return status_info
 
