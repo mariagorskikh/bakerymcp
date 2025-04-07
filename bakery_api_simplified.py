@@ -1,39 +1,13 @@
-import asyncio
 from fastapi import FastAPI, Body
 from pydantic import BaseModel
-from mcp_agent.core.fastagent import FastAgent
 import uvicorn
 
 # Create FastAPI application
 app = FastAPI(title="Bakery API", description="Bakery availability checker")
 
-# Create FastAgent
-fast = FastAgent("Bakery Agent")
-
 # Define request model for JSON input
 class BakeryQuery(BaseModel):
     query: str
-
-# Define bakery agent
-@fast.agent(
-    name="bakery",
-    instruction="""You are a helpful bakery assistant that checks if items are available.
-    
-    When a customer asks about ordering an item on a specific day, you need to:
-    1. Check if the bakery is open on that day using the filesystem tool to read bakery_hours.json
-    2. Check if the requested item is on the menu using the fetch tool to access https://www.flourbakery.com/menu
-    
-    Only say YES if both conditions are met:
-    - The bakery is open on the requested day
-    - The requested item is on the menu
-    
-    Otherwise say NO and explain why (either bakery closed or item not available).
-    Be concise in your responses.""",
-    servers=["fetch", "filesystem"],  # Using both fetch and filesystem MCP tools
-    model="openai.o3-mini.high"  # Explicitly use OpenAI model
-)
-async def bakery_agent():
-    pass  # Agent is defined by decorator
 
 # Define API endpoints
 @app.get("/")
@@ -43,24 +17,22 @@ async def root():
 
 @app.post("/check")
 async def check_availability_post(query_data: BakeryQuery):
-    """Check if an item is available at the bakery on a specific day (POST method)"""
-    try:
-        async with fast.run() as agent:
-            response = await agent.bakery(query_data.query)
-        return {"response": response}
-    except Exception as e:
-        return {"error": str(e)}
+    """Check if an item is available at the bakery (POST method)"""
+    return {"response": f"We received your query: '{query_data.query}'. Our bakery is open Monday-Saturday and closed on Sunday."}
 
 @app.get("/check")
 async def check_availability_get(item: str):
     """Check if an item is available at the bakery (GET method)"""
-    try:
-        query = f"Can I order a {item}?"
-        async with fast.run() as agent:
-            response = await agent.bakery(query)
-        return {"response": response}
-    except Exception as e:
-        return {"error": str(e)}
+    bakery_items = ["bread", "cake", "croissant", "donut", "muffin", "pie"]
+    
+    # Simple check if the item is in our predefined list
+    item_lower = item.lower()
+    for bakery_item in bakery_items:
+        if bakery_item in item_lower:
+            return {"response": f"Yes, we have {bakery_item} available in our bakery!"}
+    
+    # If no matches, return a generic message
+    return {"response": f"Sorry, we don't have '{item}' available. Our selection includes: {', '.join(bakery_items)}"}
 
 # Main function to run everything
 if __name__ == "__main__":
