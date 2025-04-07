@@ -13,7 +13,7 @@ pip install --no-cache-dir \
     typing-extensions==4.9.0 \
     starlette==0.40.0 \
     httpx==0.24.1 \
-    anyio==3.7.1 \
+    anyio==4.5.0 \
     sse-starlette==1.6.5 \
     numpy==2.2.1 \
     PyYAML==6.0.2
