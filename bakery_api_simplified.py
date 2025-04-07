@@ -1,5 +1,6 @@
 import asyncio
 from fastapi import FastAPI, Body
+from pydantic import BaseModel
 from mcp_agent.core.fastagent import FastAgent
 import uvicorn
 
@@ -8,6 +9,10 @@ app = FastAPI(title="Bakery API", description="Bakery availability checker")
 
 # Create FastAgent
 fast = FastAgent("Bakery Agent")
+
+# Define request model for JSON input
+class BakeryQuery(BaseModel):
+    query: str
 
 # Define bakery agent
 @fast.agent(
@@ -37,11 +42,11 @@ async def root():
     return {"message": "Bakery API is running. Use /check endpoint to check item availability."}
 
 @app.post("/check")
-async def check_availability_post(query: str = Body(..., example="Can I order a croissant on Monday?")):
+async def check_availability_post(query_data: BakeryQuery):
     """Check if an item is available at the bakery on a specific day (POST method)"""
     try:
         async with fast.run() as agent:
-            response = await agent.bakery(query)
+            response = await agent.bakery(query_data.query)
         return {"response": response}
     except Exception as e:
         return {"error": str(e)}
