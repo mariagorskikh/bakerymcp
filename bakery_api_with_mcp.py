@@ -7,6 +7,7 @@ from fastapi import FastAPI, Body, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from mcp_agent.core.fastagent import FastAgent
+from mcp_agent.core.config import FastAgentConfig, ServerConfig  # Add this import
 from contextlib import asynccontextmanager
 
 # Set up logging
@@ -20,19 +21,14 @@ app = FastAPI(
     description="Bakery availability checker with MCP servers"
 )
 
-# Create FastAgent with explicit config path
-# Make sure to use absolute path for reliability
-config_path = os.path.join(os.getcwd(), "fastagent.config.yaml")
-logger.info(f"Creating FastAgent with config at: {config_path}")
-
 # Define request model for JSON input
 class BakeryQuery(BaseModel):
     query: str
 
-# Define the lifespan context manager for FastAPI - much simpler now
+# Define the lifespan context manager for FastAPI
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Simple lifespan manager that just logs information"""
+    """Simple lifespan manager that configures and initializes FastAgent"""
     logger.info("Starting application lifespan...")
     
     # Print environment info for debugging
@@ -44,12 +40,13 @@ async def lifespan(app: FastAPI):
         else:
             logger.warning("bakery_hours.json not found!")
 
-        # Print the config for debugging
+        # Get configuration file path - but we won't rely on it
+        config_path = os.path.join(os.getcwd(), "fastagent.config.yaml")
         if os.path.exists(config_path):
             with open(config_path, "r") as f:
                 logger.info(f"FastAgent configuration content: {f.read()}")
         else:
-            logger.error(f"Configuration file not found at: {config_path}")
+            logger.warning(f"Configuration file not found at: {config_path}")
             
         # Print Python path and environment
         logger.info(f"Python path: {sys.path}")
@@ -58,17 +55,46 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error during environment check: {str(e)}")
     
-    # Create FastAgent here after environment is verified
+    # Create FastAgent with explicit configuration
     try:
-        # Explicitly initialize the FastAgent with configurations
-        app.state.agent_manager = FastAgent(
-            "Bakery Agent",
-            config_path=config_path,
+        # Create explicit server configs 
+        fetch_server = ServerConfig(
+            server_type="subprocess",
+            command="python3",
+            args=["-m", "mcp.server.fetch"],
+            timeout=45,
+            max_restarts=3,
+            restart_delay=2
         )
-        logger.info("FastAgent instance created successfully")
+        
+        filesystem_server = ServerConfig(
+            server_type="subprocess",
+            command="python3",
+            args=["-m", "mcp.server.filesystem", os.getcwd()],
+            timeout=30,
+            max_restarts=3,
+            restart_delay=2
+        )
+        
+        # Create explicit config object
+        explicit_config = FastAgentConfig(
+            default_model="openai.o3-mini.high",
+            mcp_servers={
+                "fetch": fetch_server,
+                "filesystem": filesystem_server
+            }
+        )
+        
+        # Create FastAgent with explicit config
+        fast_agent = FastAgent(
+            "Bakery Agent",
+            config=explicit_config  # Use explicit config instead of config_path
+        )
+        
+        logger.info("FastAgent instance created successfully with explicit config")
         
         # Define bakery agent - ensure server names match exactly with config
-        @app.state.agent_manager.agent(
+        @fast_agent.agent(
             name="bakery",
             instruction="""You are a helpful bakery assistant that checks if items are available.
             
@@ -89,6 +115,9 @@ async def lifespan(app: FastAPI):
             pass  # Agent is defined by decorator
         
         logger.info("Bakery agent defined successfully")
+        
+        # Store FastAgent in app state
+        app.state.agent_manager = fast_agent
         
     except Exception as e:
         logger.error(f"Failed to initialize FastAgent: {str(e)}")
@@ -122,7 +151,6 @@ async def run_mcp_query(query: str):
     
     try:
         # Create a local FastAgent instance just for this request
-        # According to FastAgent docs, this is more reliable than using a global instance
         local_agent = app.state.agent_manager
         
         # Each request needs its own MCP context with a short timeout
@@ -131,9 +159,14 @@ async def run_mcp_query(query: str):
             try:
                 async with local_agent.run() as agent:
                     logger.info("MCP context started successfully")
-                    response = await agent.bakery(query)
-                    logger.info("MCP query completed successfully")
-                    return {"response": response, "source": "mcp_agent"}
+                    if hasattr(agent, "bakery"):
+                        logger.info("Agent has bakery method")
+                        response = await agent.bakery(query)
+                        logger.info("MCP query completed successfully")
+                        return {"response": response, "source": "mcp_agent"}
+                    else:
+                        logger.error("Agent doesn't have bakery method")
+                        raise AttributeError("Agent doesn't have bakery method")
             except Exception as inner_e:
                 logger.error(f"Error inside MCP context: {str(inner_e)}")
                 logger.error(traceback.format_exc())
@@ -210,6 +243,39 @@ async def check_availability_get(item: str):
             }
         )
 
+# Add a simple fallback for GET /bakery-response endpoint
+@app.get("/bakery-response")
+async def fallback_response(question: str = ""):
+    """Provide a simple fallback response without using MCP"""
+    if not question:
+        return {"response": "Please provide a question about bakery items.", "source": "fallback"}
+    
+    items = ["bread", "cake", "croissant", "donut", "muffin", "pie"]
+    days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
+    
+    item_found = None
+    day_found = None
+    
+    for item in items:
+        if item in question.lower():
+            item_found = item
+            break
+            
+    for day in days:
+        if day in question.lower():
+            day_found = day
+            break
+    
+    if item_found:
+        if day_found and day_found == "sunday":
+            return {"response": f"Sorry, we're closed on Sunday so {item_found} is not available.", "source": "fallback"}
+        elif day_found:
+            return {"response": f"Yes, we have {item_found} available on {day_found.title()}.", "source": "fallback"}
+        else:
+            return {"response": f"Yes, we have {item_found} on our menu most days. Please specify which day you want to order it.", "source": "fallback"}
+    else:
+        return {"response": "I couldn't determine which item you're asking about. We have bread, cake, croissants, donuts, muffins, and pies.", "source": "fallback"}
+
 # Global exception handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -237,15 +303,15 @@ async def status():
             "files": os.listdir('.')[:10],  # List first 10 files for security
         },
         "config": {
-            "path": config_path,
-            "exists": os.path.exists(config_path)
+            "path": os.path.join(os.getcwd(), "fastagent.config.yaml"),
+            "exists": os.path.exists(os.path.join(os.getcwd(), "fastagent.config.yaml"))
         },
         "bakery_hours": {
             "exists": os.path.exists("bakery_hours.json")
         },
         "mcp_info": {
-            "status": "configured", 
-            "note": "MCP servers are initialized per-request rather than persistently"
+            "status": "configured_in_code", 
+            "note": "Using explicit ServerConfig objects instead of config file"
         }
     }
     
@@ -268,10 +334,10 @@ async def status():
     else:
         status_info["mcp_info"]["agent_manager"] = "not_available"
     
-    # Add a simple hard-coded fallback to show the API is working
-    status_info["fallback_test"] = {
-        "query": "Do you have bread?",
-        "response": "Yes, we have bread available at our bakery! (This is a fallback response)"
+    # Provide access to fallback api
+    status_info["fallback_api"] = {
+        "url": "/bakery-response?question=Do you have cake on Friday?",
+        "description": "Use this endpoint for a simple fallback response when MCP is not available"
     }
     
     return status_info
