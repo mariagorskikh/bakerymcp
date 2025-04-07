@@ -33,7 +33,7 @@ logger:
 mcp_servers:
     fetch:
         command: "python3"
-        args: ["-m", "mcp_server_fetch"]
+        args: ["-m", "mcp.server.fetch"]
     filesystem:
         command: "python3"
-        args: ["-m", "mcp_server_filesystem"]
+        args: ["-m", "mcp.server.filesystem", "."]
