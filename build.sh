@@ -9,7 +9,7 @@ pip install --no-cache-dir \
     requests==2.31.0 \
     python-dotenv==1.0.0 \
     mcp==1.6.0 \
-    pydantic==1.10.13 \
+    pydantic==2.10.4 \
     typing-extensions==4.9.0 \
     starlette==0.40.0 \
     httpx==0.24.1 \
