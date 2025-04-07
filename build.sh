@@ -16,7 +16,9 @@ pip install --no-cache-dir \
     anyio==4.5.0 \
     sse-starlette==1.6.5 \
     numpy==2.2.1 \
-    PyYAML==6.0.2
+    PyYAML==6.0.2 \
+    mcp-server-fetch==2025.1.17 \
+    mcp-server-filesystem==2025.1.16
 
 # Echo the final requirements for debugging
 echo "Final requirements installed:"

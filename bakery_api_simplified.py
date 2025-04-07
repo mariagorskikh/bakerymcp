@@ -1,54 +1,51 @@
 import asyncio
-import json
-import random
+import os
+import sys
 from fastapi import FastAPI, Body
 from pydantic import BaseModel
+from mcp_agent.core.fastagent import FastAgent
 import uvicorn
 
 # Create FastAPI application
 app = FastAPI(title="Bakery API", description="Bakery availability checker")
 
+# Print debug information
+print(f"Current working directory: {os.getcwd()}")
+print(f"Files in current directory: {os.listdir('.')}")
+if os.path.exists("fastagent.config.yaml"):
+    print("Config file exists!")
+    with open("fastagent.config.yaml", "r") as f:
+        print(f"Config file contents: {f.read()}")
+else:
+    print("Config file does not exist!")
+
+# Create FastAgent with explicit config path
+fast = FastAgent("Bakery Agent", config_path="fastagent.config.yaml")
+
 # Define request model for JSON input
 class BakeryQuery(BaseModel):
     query: str
 
-# Load bakery hours from file
-def get_bakery_hours():
-    try:
-        with open("bakery_hours.json", "r") as f:
-            return json.load(f)
-    except Exception:
-        # Fallback data if file can't be read
-        return {
-            "Monday": {"open": True, "hours": "7:00 AM - 7:00 PM"},
-            "Tuesday": {"open": True, "hours": "7:00 AM - 7:00 PM"},
-            "Wednesday": {"open": True, "hours": "7:00 AM - 7:00 PM"},
-            "Thursday": {"open": True, "hours": "7:00 AM - 7:00 PM"},
-            "Friday": {"open": True, "hours": "7:00 AM - 9:00 PM"},
-            "Saturday": {"open": True, "hours": "8:00 AM - 9:00 PM"},
-            "Sunday": {"open": False, "hours": "Closed"}
-        }
-
-# Check menu items
-def check_menu_items():
-    # Simulate menu items
-    return ["bread", "cake", "croissant", "donut", "muffin", "pie", "cookie"]
-
-# Helper function to extract day from query
-def extract_day_from_query(query):
-    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    for day in days:
-        if day.lower() in query.lower():
-            return day
-    return None
-
-# Helper function to extract item from query
-def extract_item_from_query(query):
-    menu_items = check_menu_items()
-    for item in menu_items:
-        if item.lower() in query.lower():
-            return item
-    return None
+# Define bakery agent
+@fast.agent(
+    name="bakery",
+    instruction="""You are a helpful bakery assistant that checks if items are available.
+    
+    When a customer asks about ordering an item on a specific day, you need to:
+    1. Check if the bakery is open on that day using the filesystem tool to read bakery_hours.json
+    2. Check if the requested item is on the menu using the fetch tool to access https://www.flourbakery.com/menu
+    
+    Only say YES if both conditions are met:
+    - The bakery is open on the requested day
+    - The requested item is on the menu
+    
+    Otherwise say NO and explain why (either bakery closed or item not available).
+    Be concise in your responses.""",
+    servers=["fetch", "filesystem"],  # Using both fetch and filesystem MCP tools
+    model="openai.o3-mini.high"  # Explicitly use OpenAI model
+)
+async def bakery_agent():
+    pass  # Agent is defined by decorator
 
 # Define API endpoints
 @app.get("/")
@@ -60,11 +57,8 @@ async def root():
 async def check_availability_post(query_data: BakeryQuery):
     """Check if an item is available at the bakery on a specific day (POST method)"""
     try:
-        query = query_data.query
-        day = extract_day_from_query(query)
-        item = extract_item_from_query(query)
-        
-        response = check_availability(item, day)
+        async with fast.run() as agent:
+            response = await agent.bakery(query_data.query)
         return {"response": response}
     except Exception as e:
         return {"error": str(e)}
@@ -73,37 +67,14 @@ async def check_availability_post(query_data: BakeryQuery):
 async def check_availability_get(item: str):
     """Check if an item is available at the bakery (GET method)"""
     try:
-        # Extract day if it's in the item parameter
-        day = extract_day_from_query(item)
-        # Clean up item string
-        clean_item = extract_item_from_query(item) or item.split()[0]
-        
-        response = check_availability(clean_item, day)
+        query = f"Can I order a {item}?"
+        async with fast.run() as agent:
+            response = await agent.bakery(query)
         return {"response": response}
     except Exception as e:
+        print(f"Error in check_availability_get: {str(e)}")
+        print(f"Agent configuration: {fast.context.to_dict()}")
         return {"error": str(e)}
-
-def check_availability(item, day=None):
-    bakery_hours = get_bakery_hours()
-    menu_items = check_menu_items()
-    
-    # Check if item is on menu
-    item_on_menu = any(menu_item.lower() == item.lower() for menu_item in menu_items)
-    
-    if not item_on_menu:
-        return f"NO, we don't carry {item} at our bakery. Would you like to try something else?"
-    
-    # If no day specified
-    if not day:
-        return f"YES, {item} is on our menu. Please specify which day you want it."
-    
-    # Check if bakery is open on that day
-    if day in bakery_hours and bakery_hours[day]["open"]:
-        return f"YES, we have {item} available on {day}! Our hours are {bakery_hours[day]['hours']}."
-    elif day in bakery_hours:
-        return f"NO, our bakery is closed on {day}. We're open {', '.join([d for d in bakery_hours if bakery_hours[d]['open']])}."
-    else:
-        return f"I'm not sure about that day, but {item} is on our menu. We're open Monday through Saturday."
 
 # Main function to run everything
 if __name__ == "__main__":
