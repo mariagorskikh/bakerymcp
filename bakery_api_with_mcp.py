@@ -13,11 +13,17 @@ import json
 # Create FastAgent with explicit config path
 fast = FastAgent("Bakery Agent", config_path="fastagent.config.yaml")
 
+# Global variable to hold the initialized agent
+mcp_agent = None
+
 # Define the lifespan context manager for FastAPI
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize MCP servers on startup
+    global mcp_agent
+    
     print("Starting application lifespan...")
+    print("Initializing MCP servers...")
     
     # Check if bakery_hours.json exists
     try:
@@ -42,11 +48,39 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"Warning during config validation: {str(e)}")
     
+    # Actually initialize the FastAgent and MCP servers
+    try:
+        # First, explicitly initialize the FastAgent
+        await fast.initialize()
+        print("✅ FastAgent initialized successfully!")
+        
+        # Now create a persistent agent that will be used across requests
+        # We'll store it in the app state so it's accessible to all endpoints
+        app.state.agent_manager = fast
+        print("✅ Agent manager stored in application state")
+        
+        # Print MCP server information for debugging
+        if hasattr(fast, "context") and hasattr(fast.context, "mcp_servers"):
+            print(f"MCP servers configured: {fast.context.mcp_servers.keys()}")
+        
+        print("✅ MCP servers initialized and ready")
+    except Exception as e:
+        print(f"❌ Error during MCP initialization: {str(e)}")
+        import traceback
+        traceback.print_exc()
+    
     # Yield control to FastAPI
     yield
     
     # Cleanup on shutdown
     print("Shutting down application...")
+    try:
+        # Cleanup MCP resources
+        if hasattr(fast, "context") and hasattr(fast.context, "cleanup"):
+            await fast.context.cleanup()
+            print("✅ MCP resources cleaned up")
+    except Exception as e:
+        print(f"❌ Error during cleanup: {str(e)}")
 
 # Create FastAPI application with lifespan
 app = FastAPI(
@@ -97,62 +131,21 @@ async def check_availability_post(query_data: BakeryQuery):
         query = query_data.query
         print(f"Processing POST request with query: {query}")
         
-        # Try to use the agent
-        try:
-            # We need to manually validate if MCP servers are defined and available
-            if "fetch" not in fast.context.mcp_servers or "filesystem" not in fast.context.mcp_servers:
-                raise Exception(f"MCP servers not properly configured in fastagent.config.yaml. Make sure 'fetch' and 'filesystem' are properly defined")
-            
-            # Run the agent with a timeout to prevent hanging
-            async with asyncio.timeout(10):
-                async with fast.run() as agent:
-                    print("Agent running for POST request")
-                    response = await agent.bakery(query)
-                    return {"response": response, "source": "mcp_agent"}
-        except Exception as e:
-            print(f"Agent error in POST method: {str(e)}")
-            
-            # Extract bakery item and day from query for a manual response
-            items = ["bread", "cake", "croissant", "donut", "muffin", "pie"]
-            days = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-            
-            # Use simple text processing as a fallback
-            query_lower = query.lower()
-            
-            found_item = None
-            for item in items:
-                if item in query_lower:
-                    found_item = item
-                    break
-                    
-            found_day = None
-            for day in days:
-                if day in query_lower:
-                    found_day = day
-                    break
-                    
-            if found_item and found_day:
-                # Try to read bakery_hours.json manually
-                try:
-                    with open("bakery_hours.json", "r") as f:
-                        hours = json.load(f)
-                        if found_day in hours and hours[found_day]["open"]:
-                            return {"response": f"Yes, we have {found_item} available on {found_day.title()}.", "source": "fallback"}
-                        else:
-                            return {"response": f"No, sorry. We're closed on {found_day.title()}.", "source": "fallback"}
-                except:
-                    return {"response": f"I believe we have {found_item} available on {found_day.title()}, but I couldn't verify our hours.", "source": "fallback"}
-            elif found_item:
-                return {"response": f"We have {found_item} on our menu, but please specify which day you want to order it.", "source": "fallback"}
-            else:
-                return {"response": "I couldn't determine what item you're asking about. Please specify the bakery item and day.", "source": "fallback"}
-                
+        # Access the pre-initialized FastAgent from app state
+        if not hasattr(app.state, "agent_manager"):
+            raise Exception("Agent manager not found in application state")
+        
+        agent_manager = app.state.agent_manager
+        
+        async with agent_manager.run() as agent:
+            print("Agent running for POST request")
+            response = await agent.bakery(query)
+            return {"response": response, "source": "mcp_agent"}
     except Exception as e:
         print(f"Error in POST method: {str(e)}")
         import traceback
         traceback.print_exc()
-        
-        return {"response": f"Sorry, we couldn't process your query due to a technical issue: {str(e)}", "source": "error"}
+        raise HTTPException(status_code=500, detail=f"Failed to process request: {str(e)}")
 
 @app.get("/check")
 async def check_availability_get(item: str):
@@ -161,48 +154,21 @@ async def check_availability_get(item: str):
         query = f"Can I order a {item}?"
         print(f"Processing GET request for item: {item}")
         
-        # Try to use the agent
-        try:
-            # We need to manually validate if MCP servers are defined and available
-            if "fetch" not in fast.context.mcp_servers or "filesystem" not in fast.context.mcp_servers:
-                raise Exception(f"MCP servers not properly configured in fastagent.config.yaml. Make sure 'fetch' and 'filesystem' are properly defined")
-            
-            # Run the agent with a timeout to prevent hanging
-            async with asyncio.timeout(10):
-                async with fast.run() as agent:
-                    print("Agent running for GET request")
-                    response = await agent.bakery(query)
-                    return {"response": response, "source": "mcp_agent"}
-        except Exception as e:
-            print(f"Agent error in GET method: {str(e)}")
-            
-            # Simple fallback logic
-            bakery_items = ["bread", "cake", "croissant", "donut", "muffin", "pie"]
-            item_lower = item.lower()
-            
-            for bakery_item in bakery_items:
-                if bakery_item in item_lower:
-                    try:
-                        # Try to read bakery_hours.json to check if we're open today
-                        with open("bakery_hours.json", "r") as f:
-                            hours = json.load(f)
-                            import datetime
-                            today = datetime.datetime.now().strftime("%A").lower()
-                            if today in hours and hours[today]["open"]:
-                                return {"response": f"Yes, we have {bakery_item} available today ({today.title()}).", "source": "fallback"}
-                            else:
-                                return {"response": f"We have {bakery_item}, but we're closed today ({today.title()}).", "source": "fallback"}
-                    except:
-                        return {"response": f"Yes, we have {bakery_item} available in our bakery!", "source": "fallback"}
-            
-            return {"response": f"Sorry, we don't have '{item}' available in our bakery.", "source": "fallback"}
-            
+        # Access the pre-initialized FastAgent from app state
+        if not hasattr(app.state, "agent_manager"):
+            raise Exception("Agent manager not found in application state")
+        
+        agent_manager = app.state.agent_manager
+        
+        async with agent_manager.run() as agent:
+            print("Agent running for GET request")
+            response = await agent.bakery(query)
+            return {"response": response, "source": "mcp_agent"}
     except Exception as e:
         print(f"Error in GET method: {str(e)}")
         import traceback
         traceback.print_exc()
-        
-        return {"response": f"Sorry, we couldn't check availability for '{item}' due to a technical issue: {str(e)}", "source": "error"}
+        raise HTTPException(status_code=500, detail=f"Failed to check item: {str(e)}")
 
 # Global exception handler
 @app.exception_handler(Exception)
@@ -214,6 +180,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"message": f"An unexpected error occurred: {str(exc)}"}
     )
+
+from fastapi import HTTPException
 
 # Add debug/status endpoint
 @app.get("/status")
@@ -239,14 +207,19 @@ async def status():
         }
     }
     
-    # Try to safely add MCP server info
-    try:
-        status_info["mcp"] = {
-            "servers_configured": list(fast.context.mcp_servers.keys()) if hasattr(fast, "context") and hasattr(fast.context, "mcp_servers") else [],
-            "agents_configured": list(fast.agents.keys()) if hasattr(fast, "agents") else []
-        }
-    except Exception as e:
-        status_info["mcp"] = {"error": str(e)}
+    # Add MCP server info from the pre-initialized agent
+    if hasattr(app.state, "agent_manager"):
+        agent_manager = app.state.agent_manager
+        if hasattr(agent_manager, "context") and hasattr(agent_manager.context, "mcp_servers"):
+            status_info["mcp"] = {
+                "status": "initialized",
+                "servers_configured": list(agent_manager.context.mcp_servers.keys()),
+                "agents_configured": list(agent_manager.agents.keys()) if hasattr(agent_manager, "agents") else []
+            }
+        else:
+            status_info["mcp"] = {"status": "not_fully_initialized", "error": "MCP context or servers not available"}
+    else:
+        status_info["mcp"] = {"status": "not_initialized", "error": "Agent manager not found in application state"}
     
     return status_info
 

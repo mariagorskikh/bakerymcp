@@ -1,14 +1,19 @@
 services:
   - type: web
     name: bakery-api
-    env: docker
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    env: python
+    buildCommand: chmod +x build.sh && ./build.sh
+    startCommand: python3 bakery_api_with_mcp.py
     plan: free
     healthCheckPath: /status
-    # Wait for 90 seconds before considering the deployment successful
-    initialDeployHook: sleep 90
+    # Wait for MCP servers to fully initialize
+    initialDeployHook: sleep 30
+    # Automatically restart on failure
+    autoDeploy: false
+    # Use Python 3.11 for best compatibility with MCP
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0 
       - key: PORT
         value: 10000
       - key: PYTHONUNBUFFERED 
